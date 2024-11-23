@@ -1,0 +1,174 @@
+name: Build & Release
+
+on:
+  workflow_dispatch:
+
+env:
+  GO_VERSION: 1.22
+  PROJECT_NAME: redun-pendancy
+
+jobs:
+  init_release:
+    name: Set build version
+    runs-on: ubuntu-latest
+
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      build_version: ${{ steps.init_version.outputs.build_version }}
+
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 1
+
+    - name: Set build version
+      id: init_version
+      run: |
+        today=$(date +"%Y%m%d")
+        versionPrefix="${GITHUB_REF_NAME}-${today}"
+
+        git fetch --tags
+        latestRevision=$(git for-each-ref "refs/tags/${versionPrefix}-r*" --sort=-committerdate --format "%(refname:short)" | sed -E "s/.*-r([0-9]+)$/\1/" | head -n 1)
+
+        if [[ -z "$latestRevision" ]]; then
+            nextRevision=1
+        else
+            nextRevision=$((latestRevision + 1))
+        fi
+
+        buildVersion="${versionPrefix}-r${nextRevision}"
+        echo "build_version=$buildVersion" >> $GITHUB_OUTPUT
+        echo ""
+        echo "Build version: $buildVersion"
+
+    - name: Create release
+      id: create_release
+      uses: actions/create-release@v1
+      with:
+        tag_name: ${{ steps.init_version.outputs.build_version }}
+        release_name: ${{ needs.init_version.outputs.build_version }}
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    name: Build and release
+    needs: init_release
+
+    permissions:
+      contents: write
+
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        include:
+        - os: windows-latest
+          platform: windows
+          packageOS: windows
+          packageExtension: zip
+          packageContentType: application/zip
+
+        - os: ubuntu-latest
+          platform: linux
+          packageOS: linux
+          packageExtension: tar.gz
+          packageContentType: application/gzip
+
+        - os: macos-latest
+          platform: darwin
+          packageOS: macos
+          packageExtension: tar.gz
+          packageContentType: application/gzip
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      with:
+        fetch-depth: 1
+
+    - name: Install Go ${{ env.GO_VERSION }}
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+
+    - name: '[Windows] Install rsrc'
+      if: matrix.platform == 'windows'
+      run: go install github.com/akavel/rsrc@latest
+
+    - name: '[Windows] Generate .syso file'
+      if: matrix.platform == 'windows'
+      run: rsrc -ico assets/icon.ico -o icon.syso
+
+    - name: '[Linux] Install OpenGL and GLFW dependencies'
+      if: matrix.platform == 'linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgl1-mesa-dev xorg-dev libglfw3-dev
+
+    - name: Build Application
+      run: |
+        go build -ldflags="-X 'main.APP_VERSION=${{ needs.init_release.outputs.build_version }}'" .
+      env:
+        GOOS: ${{ matrix.platform }}
+        GOARCH: amd64
+        CGO_ENABLED: 1
+
+    - name: '[Windows] Package release'
+      if: matrix.platform == 'windows'
+      run: |
+        mkdir release
+        move ${{ env.PROJECT_NAME }}.exe ./release/
+        Compress-Archive -Path ./release/* -DestinationPath ${{ needs.init_release.outputs.build_version }}.zip
+
+    - name: '[Linux] Package release'
+      if: matrix.platform == 'linux'
+      run: |
+        mkdir release
+        mv ./assets/icon.png ./release/
+        mv ./assets/.desktop ./release/
+        mv ${{ env.PROJECT_NAME }} ./release/
+        cd release
+        export GLOBIGNORE=".:.."
+        tar -czvf ../${{ needs.init_release.outputs.build_version }}.tar.gz *
+
+    - name: '[MacOS] Generate .icns file'
+      if: matrix.platform == 'darwin'
+      run: |
+        iconutil -c icns assets/icon.iconset
+
+    - name: '[MacOS] Package release'
+      if: matrix.platform == 'darwin'
+      run: |
+        mkdir -p $PROJECT_NAME.app/Contents/{MacOS,Resources}
+        mv $PROJECT_NAME $PROJECT_NAME.app/Contents/MacOS/
+        mv ./assets/icon.icns $PROJECT_NAME.app/Contents/Resources/
+
+        #MacOS uses BSD "sed", which requires '' after -i for in-place edits.
+        sed -i '' "s/__BUILD_VERSION__/$BUILD_VERSION/" ./assets/Info.plist
+        mv ./assets/Info.plist $PROJECT_NAME.app/Contents/
+
+        mkdir release
+        mv ${{ env.PROJECT_NAME }}.app ./release/
+        cd release
+        export GLOBIGNORE=".:.."
+        tar -czvf ../$BUILD_VERSION.tar.gz *
+      env:
+        PROJECT_NAME: ${{ env.PROJECT_NAME }}
+        BUILD_VERSION: ${{ needs.init_release.outputs.build_version }}
+
+    - name: Upload package
+      uses: actions/upload-release-asset@v1
+      with:
+        upload_url: ${{ needs.init_release.outputs.upload_url }}
+        asset_path: ./${{ needs.init_release.outputs.build_version }}.${{ matrix.packageExtension }}
+        asset_name: ${{ env.PROJECT_NAME }}_${{ needs.init_release.outputs.build_version }}_${{ matrix.packageOS }}.${{ matrix.packageExtension }}
+        asset_content_type: ${{ matrix.packageContentType }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

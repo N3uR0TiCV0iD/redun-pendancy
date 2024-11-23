@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+    <dict>
+        <key>CFBundleName</key>
+        <string>redun-pendancy</string>
+        <key>CFBundleExecutable</key>
+        <string>redun-pendancy</string>
+        <key>CFBundleIdentifier</key>
+        <string>com.github.redun-pendancy</string>
+        <key>CFBundleVersion</key>
+        <string>__BUILD_VERSION__</string>
+        <key>CFBundleIconFile</key>
+        <string>icon</string>
+        <key>CFBundlePackageType</key>
+        <string>APPL</string>
+    </dict>
+</plist>

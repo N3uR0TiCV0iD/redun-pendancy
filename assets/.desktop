@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=redun-pendancy
+Exec=/usr/local/bin/redun-pendancy
+Icon=/usr/local/share/icons/redun-pendancy/icon.png
+Terminal=true
+Categories=Utility;
